@@ -74,15 +74,7 @@ public class CircularChannelTests
         var message = new ArraySegment<byte>([1]);
         writer.TryWrite(in message).Should().BeTrue();
 
-        // A terminated owner makes the reader's next WaitOne acquire the mutex and throw.
-        var mutexName = FrameworkDescription.Instance.IsWindows() ? @"Global\" + name : name;
-        var owner = new Thread(() =>
-        {
-            using var mutex = new Mutex(initiallyOwned: false, mutexName);
-            mutex.WaitOne();
-        });
-        owner.Start();
-        owner.Join(5_000).Should().BeTrue();
+        AbandonMutex(name);
 
         using var firstMessageReceived = new ManualResetEventSlim();
         using var messagesReceived = new CountdownEvent(2);
@@ -97,6 +89,26 @@ public class CircularChannelTests
         // Receiving the first message alone can hide a recursive mutex acquisition leak.
         writer.TryWrite(in message).Should().BeTrue("the reader must release ownership before another thread can send");
         messagesReceived.Wait(5_000).Should().BeTrue();
+    }
+
+    [Fact]
+    public void OpeningAChannelAndWritingAcquireAnAbandonedMutex()
+    {
+        var name = nameof(OpeningAChannelAndWritingAcquireAnAbandonedMutex) + "-" + Guid.NewGuid().ToString("n");
+        var settings = new CircularChannelSettings { PollingInterval = 10, MutexTimeout = 200 };
+        using var channel = new CircularChannel(name, settings);
+
+        AbandonMutex(name);
+        using var attachedChannel = new CircularChannel(name, settings);
+        AbandonMutex(name);
+        using var writer = attachedChannel.GetWriter();
+        var message = new ArraySegment<byte>([1]);
+        writer.TryWrite(in message).Should().BeTrue();
+
+        using var received = new ManualResetEventSlim();
+        using var reader = channel.GetReader();
+        reader.SetCallback(_ => received.Set());
+        received.Wait(5_000).Should().BeTrue("opening the channel and writing must release the mutex they acquired");
     }
 
     [Fact]
@@ -136,6 +148,19 @@ public class CircularChannelTests
         reader.Dispose();
 
         received.CurrentCount.Should().Be(0);
+    }
+
+    private static void AbandonMutex(string channelName)
+    {
+        // A terminated owner makes the next WaitOne on the channel's mutex acquire it and throw.
+        var mutexName = FrameworkDescription.Instance.IsWindows() ? @"Global\" + channelName : channelName;
+        var owner = new Thread(() =>
+        {
+            using var mutex = new Mutex(initiallyOwned: false, mutexName);
+            mutex.WaitOne();
+        });
+        owner.Start();
+        owner.Join(5_000).Should().BeTrue();
     }
 
     [Collection(nameof(HighConcurrencyTestCollection))]
