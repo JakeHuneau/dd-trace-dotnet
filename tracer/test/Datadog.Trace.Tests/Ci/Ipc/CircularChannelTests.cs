@@ -99,6 +99,45 @@ public class CircularChannelTests
         messagesReceived.Wait(5_000).Should().BeTrue();
     }
 
+    [Fact]
+    public void AttachingToAChannelKeepsUnreadMessages()
+    {
+        var name = nameof(AttachingToAChannelKeepsUnreadMessages) + "-" + Guid.NewGuid().ToString("n");
+        var settings = new CircularChannelSettings { PollingInterval = 10 };
+        using var channel = new CircularChannel(name, settings);
+        using var writer = channel.GetWriter();
+        var message = new ArraySegment<byte>([1]);
+        writer.TryWrite(in message).Should().BeTrue();
+
+        // Each IPC client attaches to the channel the session created.
+        using var attachedChannel = new CircularChannel(name, settings);
+
+        using var received = new ManualResetEventSlim();
+        using var reader = channel.GetReader();
+        reader.SetCallback(_ => received.Set());
+        received.Wait(5_000).Should().BeTrue();
+    }
+
+    [Fact]
+    public void DisposingAReaderReadsMessagesWrittenBeforeIt()
+    {
+        var name = nameof(DisposingAReaderReadsMessagesWrittenBeforeIt) + "-" + Guid.NewGuid().ToString("n");
+        using var channel = new CircularChannel(name, new CircularChannelSettings { PollingInterval = 1_000 });
+        using var writer = channel.GetWriter();
+        var message = new ArraySegment<byte>([1]);
+        using var received = new CountdownEvent(2);
+        var reader = channel.GetReader();
+        reader.SetCallback(_ => received.Signal());
+
+        // Once the first message is read, the reader waits a full polling interval before reading again.
+        writer.TryWrite(in message).Should().BeTrue();
+        SpinWait.SpinUntil(() => received.CurrentCount == 1, 5_000).Should().BeTrue();
+        writer.TryWrite(in message).Should().BeTrue();
+        reader.Dispose();
+
+        received.CurrentCount.Should().Be(0);
+    }
+
     [Collection(nameof(HighConcurrencyTestCollection))]
     public class ConcurrencyTests
     {

@@ -88,15 +88,20 @@ internal sealed partial class CircularChannel : IChannel
             var stream = new FileStream(fileName, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
 
             // Ensure we have the correct size
+            var created = stream.Length != _settings.BufferSize;
             stream.SetLength(_settings.BufferSize);
 
             // Create the memory mapped file from the stream
             _mmf = MemoryMappedFile.CreateFromFile(stream, mapName: null, _settings.BufferSize, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, leaveOpen: false);
 
-            // Initialize the write and read pointer
-            using var accessor = _mmf.CreateViewAccessor();
-            accessor.Write(0, (ushort)0); // Write pointer
-            accessor.Write(2, (ushort)0); // Read pointer
+            // Initialize the write and read pointer only for a new file: another process attaching to an existing
+            // channel must not drop the messages that haven't been read yet.
+            if (created)
+            {
+                using var accessor = _mmf.CreateViewAccessor();
+                accessor.Write(0, (ushort)0); // Write pointer
+                accessor.Write(2, (ushort)0); // Read pointer
+            }
         }
         finally
         {
