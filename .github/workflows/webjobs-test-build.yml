@@ -1,4 +1,5 @@
 # Test build for the Azure WebJobs loader change: native loader DLLs (x64 + x86) and its native unit tests.
+# The runner image lacks the project's pinned Windows SDK (10.0.19041.0), so it builds against the newest installed one.
 # Lives only on the fork's webjobs-test-build branch; not part of the PR.
 name: WebJobs test build
 
@@ -39,7 +40,7 @@ jobs:
         run: |
           foreach ($platform in 'x64', 'Win32') {
             & "${{ steps.vs.outputs.msbuild }}" shared\src\Datadog.Trace.ClrProfiler.Native\Datadog.Trace.ClrProfiler.Native.vcxproj /m /nologo /v:m `
-              /p:Configuration=Release /p:Platform=$platform /p:PlatformToolset=${{ steps.vs.outputs.toolset }}
+              /p:Configuration=Release /p:Platform=$platform /p:PlatformToolset=${{ steps.vs.outputs.toolset }} /p:WindowsTargetPlatformVersion=10.0
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
@@ -47,7 +48,7 @@ jobs:
         shell: pwsh
         run: |
           & "${{ steps.vs.outputs.msbuild }}" shared\test\Datadog.Trace.ClrProfiler.Native.Tests\Datadog.Trace.ClrProfiler.Native.Tests.vcxproj /m /nologo /v:m `
-            /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=${{ steps.vs.outputs.toolset }}
+            /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=${{ steps.vs.outputs.toolset }} /p:WindowsTargetPlatformVersion=10.0
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $exe = Get-ChildItem -Recurse artifacts\native-bin\Datadog.Trace.ClrProfiler.Native.Tests -Filter Datadog.Trace.ClrProfiler.Native.Tests.exe | Select-Object -First 1
           & $exe.FullName --gtest_output=xml:native-loader-tests.xml
