@@ -32,8 +32,11 @@ public:
     // The DOTNET_CLI_TELEMETRY_PROFILE in the context of azure app services
     inline static const shared::WSTRING azure_app_services_cli_telemetry_profiler_value = WStr("DOTNET_CLI_TELEMETRY_PROFILE");
 
+    // Set by the site extension in the scm (Kudu) host, so the processes it starts aren't instrumented (except WebJobs)
+    inline static const shared::WSTRING azure_app_services_scm_host = WStr("DD_AZURE_APP_SERVICES_SCM");
+
     // Set by Kudu to the WebJob's name in every process it starts for a WebJob.
-    // Used to tell WebJobs apart from Kudu's own processes, which share the same app pool id.
+    // Used to tell WebJobs apart from the other processes of the scm host.
     inline static const shared::WSTRING azure_app_services_webjobs_name = WStr("WEBJOBS_NAME");
 
     // Enables instrumentation of Azure App Services WebJobs. Default value is false.

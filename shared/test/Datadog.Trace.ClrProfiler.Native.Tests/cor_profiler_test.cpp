@@ -562,18 +562,31 @@ static HRESULT InitializeInAzureAppServices(const ::shared::WSTRING& app_pool_id
     return profiler->Initialize(test_profiler.get());
 }
 
+TEST(cor_profiler, AzureAppServicesInstrumentsSite)
+{
+    EXPECT_NE(CORPROF_E_PROFILER_CANCEL_ACTIVATION, InitializeInAzureAppServices(WStr("mysite")));
+}
+
 TEST(cor_profiler, AzureAppServicesSkipsKuduProcesses)
 {
+    // Processes started by Kudu
     EXPECT_EQ(CORPROF_E_PROFILER_CANCEL_ACTIVATION, InitializeInAzureAppServices(WStr("~1mysite")));
 
-    EnvironmentVariable kudu(WStr("DOTNET_CLI_TELEMETRY_PROFILE"), WStr("AzureKudu"));
-    EXPECT_EQ(CORPROF_E_PROFILER_CANCEL_ACTIVATION, InitializeInAzureAppServices(WStr("mysite")));
+    {
+        EnvironmentVariable kudu(WStr("DOTNET_CLI_TELEMETRY_PROFILE"), WStr("AzureKudu"));
+        EXPECT_EQ(CORPROF_E_PROFILER_CANCEL_ACTIVATION, InitializeInAzureAppServices(WStr("mysite")));
+    }
+
+    // Kudu's own w3wp, which doesn't have APP_POOL_ID yet when the profiler is initialized
+    EnvironmentVariable scm(WStr("DD_AZURE_APP_SERVICES_SCM"), WStr("1"));
+    EXPECT_EQ(CORPROF_E_PROFILER_CANCEL_ACTIVATION, InitializeInAzureAppServices(WStr("")));
 }
 
 TEST(cor_profiler, AzureAppServicesSkipsWebJobsByDefault)
 {
-    EnvironmentVariable webjob(WStr("WEBJOBS_NAME"), WStr("myjob"));
+    EnvironmentVariable scm(WStr("DD_AZURE_APP_SERVICES_SCM"), WStr("1"));
     EnvironmentVariable kudu(WStr("DOTNET_CLI_TELEMETRY_PROFILE"), WStr("AzureKudu"));
+    EnvironmentVariable webjob(WStr("WEBJOBS_NAME"), WStr("myjob"));
 
     EXPECT_EQ(CORPROF_E_PROFILER_CANCEL_ACTIVATION, InitializeInAzureAppServices(WStr("~1mysite")));
 
@@ -584,9 +597,11 @@ TEST(cor_profiler, AzureAppServicesSkipsWebJobsByDefault)
 TEST(cor_profiler, AzureAppServicesInstrumentsWebJobsWhenEnabled)
 {
     EnvironmentVariable enabled(WStr("DD_TRACE_AZURE_WEBJOBS_ENABLED"), WStr("true"));
+    EnvironmentVariable scm(WStr("DD_AZURE_APP_SERVICES_SCM"), WStr("1"));
     EnvironmentVariable kudu(WStr("DOTNET_CLI_TELEMETRY_PROFILE"), WStr("AzureKudu"));
 
-    // Kudu's own processes stay excluded: only WebJob processes have WEBJOBS_NAME
+    // The other processes of the scm host stay excluded: only WebJob processes have WEBJOBS_NAME
+    EXPECT_EQ(CORPROF_E_PROFILER_CANCEL_ACTIVATION, InitializeInAzureAppServices(WStr("")));
     EXPECT_EQ(CORPROF_E_PROFILER_CANCEL_ACTIVATION, InitializeInAzureAppServices(WStr("~1mysite")));
 
     EnvironmentVariable webjob(WStr("WEBJOBS_NAME"), WStr("myjob"));
