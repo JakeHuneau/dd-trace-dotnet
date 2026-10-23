@@ -1,0 +1,63 @@
+# Test build for the Azure WebJobs loader change: native loader DLLs (x64 + x86) and its native unit tests.
+# Lives only on the fork's webjobs-test-build branch; not part of the PR.
+name: WebJobs test build
+
+on:
+  push:
+    branches: [webjobs-test-build-3.56.0]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick Visual Studio and toolset
+        id: vs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          & $vswhere -all -prerelease -products * -format json | ConvertFrom-Json | ForEach-Object { "$($_.displayName) $($_.installationVersion) $($_.installationPath)" }
+          $vs = & $vswhere -latest -prerelease -products * -requires Microsoft.Component.MSBuild -format json | ConvertFrom-Json | Select-Object -First 1
+          $msbuild = Join-Path $vs.installationPath 'MSBuild\Current\Bin\amd64\MSBuild.exe'
+          $toolset = if ([version]$vs.installationVersion -ge [version]'18.0') { 'v145' } else { 'v143' }
+          if ($toolset -ne 'v145') { Write-Output "::warning::Visual Studio 2026 not found, building with $toolset instead of v145" }
+          "msbuild=$msbuild" >> $env:GITHUB_OUTPUT
+          "toolset=$toolset" >> $env:GITHUB_OUTPUT
+
+      - name: Restore native test packages
+        shell: pwsh
+        run: nuget restore shared\test\Datadog.Trace.ClrProfiler.Native.Tests\packages.config -PackagesDirectory packages
+
+      - name: Build native loader
+        shell: pwsh
+        run: |
+          foreach ($platform in 'x64', 'Win32') {
+            & "${{ steps.vs.outputs.msbuild }}" shared\src\Datadog.Trace.ClrProfiler.Native\Datadog.Trace.ClrProfiler.Native.vcxproj /m /nologo /v:m `
+              /p:Configuration=Release /p:Platform=$platform /p:PlatformToolset=${{ steps.vs.outputs.toolset }}
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Build and run native loader tests
+        shell: pwsh
+        run: |
+          & "${{ steps.vs.outputs.msbuild }}" shared\test\Datadog.Trace.ClrProfiler.Native.Tests\Datadog.Trace.ClrProfiler.Native.Tests.vcxproj /m /nologo /v:m `
+            /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=${{ steps.vs.outputs.toolset }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = Get-ChildItem -Recurse artifacts\native-bin\Datadog.Trace.ClrProfiler.Native.Tests -Filter Datadog.Trace.ClrProfiler.Native.Tests.exe | Select-Object -First 1
+          & $exe.FullName --gtest_output=xml:native-loader-tests.xml
+          exit $LASTEXITCODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-loader-${{ steps.vs.outputs.toolset }}
+          path: |
+            artifacts/native-bin/Datadog.Trace.ClrProfiler.Native/Release/**/Datadog.Trace.ClrProfiler.Native.dll
+            artifacts/native-bin/Datadog.Trace.ClrProfiler.Native/Release/**/Datadog.Trace.ClrProfiler.Native.pdb
+            native-loader-tests.xml

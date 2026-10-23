@@ -258,22 +258,45 @@ namespace datadog::shared::nativeloader
 
             const auto& app_pool_id_value = GetEnvironmentValue(environment::azure_app_services_app_pool_id);
 
-            if (app_pool_id_value.size() > 1 && app_pool_id_value.at(0) == '~')
+            // WebJobs are started by Kudu, so they inherit the SCM app pool id and Kudu's
+            // DOTNET_CLI_TELEMETRY_PROFILE and would be rejected by the checks below.
+            // Kudu sets WEBJOBS_NAME only for WebJob processes, so let those through when the user opts in.
+            const auto& webjob_name = GetEnvironmentValue(environment::azure_app_services_webjobs_name);
+            bool webjobs_enabled = false;
+            const bool is_enabled_webjob = !webjob_name.empty() &&
+                                           TryParseBooleanEnvironmentValue(
+                                               GetEnvironmentValue(environment::azure_webjobs_instrumentation_enabled),
+                                               webjobs_enabled) &&
+                                           webjobs_enabled;
+
+            if (is_enabled_webjob)
             {
-                Log::Info(
-                    "DATADOG TRACER DIAGNOSTICS - Datadog SDK disabled: ", environment::azure_app_services_app_pool_id, " ",
-                    app_pool_id_value, " is an Azure App Services infrastructure process.");
-                return CORPROF_E_PROFILER_CANCEL_ACTIVATION;
+                Log::Info("Azure App Services WebJob detected: ", webjob_name);
             }
-
-            const auto& cli_telemetry_profile_value =
-                GetEnvironmentValue(environment::azure_app_services_cli_telemetry_profiler_value);
-
-            if (cli_telemetry_profile_value == WStr("AzureKudu"))
+            else
             {
-                Log::Info("DATADOG TRACER DIAGNOSTICS - Datadog SDK disabled: ", app_pool_id_value,
-                             " is Kudu, an Azure App Services reserved process.");
-                return CORPROF_E_PROFILER_CANCEL_ACTIVATION;
+                if (app_pool_id_value.size() > 1 && app_pool_id_value.at(0) == '~')
+                {
+                    Log::Info(
+                        "DATADOG TRACER DIAGNOSTICS - Datadog SDK disabled: ", environment::azure_app_services_app_pool_id, " ",
+                        app_pool_id_value, " is an Azure App Services infrastructure process.");
+                    if (!webjob_name.empty())
+                    {
+                        Log::Info("WebJob ", webjob_name, " detected. Set ", environment::azure_webjobs_instrumentation_enabled,
+                                  "=true to instrument WebJobs.");
+                    }
+                    return CORPROF_E_PROFILER_CANCEL_ACTIVATION;
+                }
+
+                const auto& cli_telemetry_profile_value =
+                    GetEnvironmentValue(environment::azure_app_services_cli_telemetry_profiler_value);
+
+                if (cli_telemetry_profile_value == WStr("AzureKudu"))
+                {
+                    Log::Info("DATADOG TRACER DIAGNOSTICS - Datadog SDK disabled: ", app_pool_id_value,
+                                 " is Kudu, an Azure App Services reserved process.");
+                    return CORPROF_E_PROFILER_CANCEL_ACTIVATION;
+                }
             }
 
             const auto& functions_worker_runtime_value =
